@@ -70,9 +70,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 @media (max-width: 819px) {
   #nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; justify-content: space-around; background: var(--surface); border-top: 1px solid var(--line);
     padding-top: 4px; padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px)); padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
-  main { padding-bottom: calc(var(--tab-h) + 24px + env(safe-area-inset-bottom, 0px)) !important; }
+  .ft { padding-bottom: calc(var(--tab-h) + 16px + env(safe-area-inset-bottom, 0px)) !important; }
   body[data-view="practice"] #nav { display: none; }
-  body[data-view="practice"] main { padding-bottom: 32px !important; }
+  body[data-view="practice"] .ft { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important; }
   .xpbar { width: 84px; }
 }
 @media (min-width: 820px) {
@@ -443,3 +443,7 @@ a.btn.primary { color: var(--blade-ink); }
 .ask-thumb { font-size: .82rem; color: var(--ink-3); max-height: 160px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
 .ask-thumb img { display: block; width: 100%; height: auto; }
 .ask-card .fine { margin: 0; }
+
+/* ---------- footer ---------- */
+.ft { max-width: 760px; margin: 0 auto; border-top: 1px solid var(--line); padding-block: 14px 20px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.ft p { margin: 0; text-align: center; font-size: .78rem; color: var(--ink-3); letter-spacing: .02em; }

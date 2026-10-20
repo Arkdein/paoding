@@ -74,11 +74,12 @@
 
   /* ---------------- storage ---------------- */
   const KEY = 'paoding-v1';
-  const DEF = () => ({ xp: 0, done: {}, mistakes: {}, cards: {}, streak: { n: 0, last: '' }, daily: { date: '', n: 0 }, stats: { nodes: 0, first: 0, sent: 0, en: 0, clean: 0, reviewed: 0, bossBest: 0, bossPerfect: 0 }, badges: {} });
+  const DEF = () => ({ xp: 0, done: {}, mistakes: {}, cards: {}, streak: { n: 0, last: '' }, daily: { date: '', n: 0 }, stats: { nodes: 0, first: 0, sent: 0, en: 0, clean: 0, reviewed: 0, bossBest: 0, bossPerfect: 0 }, badges: {}, rel: {}, conf: {}, log: [], profile: { name: '', cls: '' }, lastExport: 0 });
+  const LOG_MAX = 400;
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { const o = JSON.parse(raw); const d = DEF(); return Object.assign(d, o, { stats: Object.assign(d.stats, o.stats || {}), streak: Object.assign(d.streak, o.streak || {}), daily: Object.assign(d.daily, o.daily || {}) }); }
+      if (raw) { const o = JSON.parse(raw); const d = DEF(); return Object.assign(d, o, { stats: Object.assign(d.stats, o.stats || {}), streak: Object.assign(d.streak, o.streak || {}), daily: Object.assign(d.daily, o.daily || {}), profile: Object.assign(d.profile, o.profile || {}) }); }
     } catch (e) { /* storage unavailable */ }
     return DEF();
   }
@@ -233,7 +234,7 @@
     if (bossTimer) { clearInterval(bossTimer); bossTimer = null; }
     view = v;
     document.body.dataset.view = v;
-    document.querySelectorAll('#nav a').forEach(a => a.setAttribute('aria-current', a.dataset.v === v || (v === 'card' && a.dataset.v === 'learn') || ((v === 'teacher' || v === 'review') && a.dataset.v === 'me') ? 'page' : 'false'));
+    document.querySelectorAll('#nav a').forEach(a => a.setAttribute('aria-current', a.dataset.v === v || (v === 'card' && a.dataset.v === 'learn') || ((v === 'teacher' || v === 'review' || v === 'report') && a.dataset.v === 'me') ? 'page' : 'false'));
     const m = $('#main');
     if (v === 'home') m.innerHTML = homeHTML(), bindHome();
     else if (v === 'learn') m.innerHTML = learnHTML(), bindLearn();
@@ -241,10 +242,71 @@
     else if (v === 'me') m.innerHTML = meHTML(), bindMe();
     else if (v === 'review') m.innerHTML = reviewHTML(), bindReview();
     else if (v === 'teacher') m.innerHTML = teacherHTML(), bindTeacher();
+    else if (v === 'report') m.innerHTML = reportHTML(), bindReport();
     else if (v === 'practice') renderPractice();
     renderHeader();
     if (v !== 'practice') window.scrollTo(0, 0);
     try { const h = ['learn', 'me', 'teacher'].includes(v) ? '#' + v : ''; history.replaceState(null, '', location.pathname + location.search + h); } catch (e) { /* ignore */ }
+  }
+
+
+  /* ---------------- mastery & recommendations ---------------- */
+  const relInfo = {};
+  function itemRels(it) {
+    if (relInfo[it.id]) return relInfo[it.id];
+    const P = parseTree(it.tree, it.lang), cnt = {}; let nodes = 0;
+    if (P.root) walkNodes(P.root, nd => { cnt[nd.rel] = (cnt[nd.rel] || 0) + 1; nodes++; });
+    return (relInfo[it.id] = { cnt, nodes });
+  }
+  function mastery(r) { const st = S.rel[r]; if (!st || !st.h.length) return null; return st.h.reduce((a, b) => a + b, 0) / st.h.length; }
+  function weakness(r) { const st = S.rel[r]; if (!st || !st.h.length) return 0.55; const h = st.h; return 1 - (h.reduce((a, b) => a + b, 0) + 1) / (h.length + 2); }
+  function weakRels(k) { return REL_ORDER.filter(r => S.rel[r] && S.rel[r].h.length >= 1).map(r => ({ r, m: mastery(r) })).filter(x => x.m < 0.8).sort((a, b) => a.m - b.m).slice(0, k); }
+  function targetSize() {
+    const clean = S.log.filter(e => e.c && e.m !== 'boss').slice(-8).map(e => e.n.length);
+    if (!clean.length) return S.stats.sent ? 2 : 1;
+    clean.sort((a, b) => a - b); return clean[Math.floor(clean.length / 2)] + 1;
+  }
+  function recommend(k) {
+    k = k || ROUND;
+    const pool = BANK.sets.filter(s => !s.boss).flatMap(s => s.items);
+    if (!S.stats.nodes) return { ids: (setById('phrase') || BANK.sets[0]).items.slice(0, k).map(i => i.id), why: {}, first: true };
+    const tgt = targetSize();
+    const recent = new Set(S.log.slice(-15).map(e => e.id));
+    const scored = pool.map(it => {
+      const info = itemRels(it);
+      let w = 0; Object.keys(info.cnt).forEach(r => { w += info.cnt[r] * weakness(r); });
+      w = w / info.nodes * 4;
+      let nov = S.done[it.id] ? (S.mistakes[it.id] ? 0.8 : -1.5) : 1.2;
+      if (recent.has(it.id)) nov -= 2;
+      const fit = -0.3 * Math.abs(info.nodes - tgt);
+      return { it, score: w + nov + fit + Math.random() * 0.4 };
+    }).sort((a, b) => b.score - a.score);
+    const ids = scored.slice(0, k).map(x => x.it.id);
+    const why = {};
+    ids.forEach(id => {
+      const c = itemRels(ITEM[id]).cnt;
+      why[id] = Object.keys(c).sort((a, b) => weakness(b) - weakness(a)).slice(0, 2).map(r => REL[r].chip || REL[r].zh);
+    });
+    return { ids, why, tgt };
+  }
+  function startRec() { const R = recommend(); startSession({ mode: 'rec', ids: R.ids, title: '为你推荐' }); }
+  function recHTML() {
+    const W = weakRels(3);
+    let body;
+    if (!S.stats.nodes) body = '<p class="rec-d">还没有练习记录。先从五大关系热身开始，系统会根据你的表现推荐题目。</p>';
+    else if (!W.length) body = '<p class="rec-d">各种关系都掌握得不错。推荐几句更长、更难的句子来挑战你。</p>';
+    else body = '<p class="rec-d">根据你最近的作答，这几种关系还需要多练：</p><div class="rec-chips">' + W.map(x => '<span class="mchip ' + mcls(x.m) + '">' + esc(REL[x.r].chip || REL[x.r].zh) + ' <b>' + Math.round(x.m * 100) + '%</b></span>').join('') + '</div>';
+    return '<section class="rec"><div class="daily-head"><p class="eyebrow">为你推荐 · For you</p></div>' + body + '<button class="btn primary" id="rec-go">开始推荐练习（' + ROUND + ' 句）</button></section>';
+  }
+  const mcls = m => m == null ? 'none' : m < 0.6 ? 'low' : m < 0.8 ? 'mid' : 'high';
+  function masteryHTML() {
+    const rows = REL_ORDER.map(r => {
+      const m = mastery(r), st = S.rel[r];
+      return '<div class="mrow"><span class="mrow-l">' + esc(REL[r].chip || REL[r].zh) + '</span><span class="mbar"><i class="' + mcls(m) + '" style="width:' + (m == null ? 0 : Math.round(m * 100)) + '%"></i></span><span class="mrow-v">' + (m == null ? '未练' : Math.round(m * 100) + '%') + '</span><span class="mrow-n">' + (st ? st.n : 0) + ' 次</span></div>';
+    }).join('');
+    const conf = Object.entries(S.conf).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    return '<h2 class="sec-title">掌握程度 <span>Mastery</span></h2><p class="page-sub">每种关系最近 20 次的一次答对率（不用提示、不看答案、一次切对并选对）。</p><div class="mastery">' + rows + '</div>' +
+      (conf.length ? '<p class="conf-t">常见混淆</p><ul class="conf">' + conf.map(([k, v]) => { const [a, b] = k.split('>'); return '<li>把 <b>' + esc(REL[b] ? (REL[b].chip || REL[b].zh) : b) + '</b> 判断成 ' + esc(REL[a] ? (REL[a].chip || REL[a].zh) : a) + ' <span>×' + v + '</span></li>'; }).join('') + '</ul>' : '');
   }
 
   /* ---------------- home ---------------- */
@@ -273,7 +335,7 @@
       '<div class="hero-text"><h1 class="brand">庖丁<span>层次分析练习</span></h1>' +
       '<blockquote class="motto">依乎天理，批大郤，导大窾，因其固然。<span>Follow the natural grain; strike the large gaps; guide the blade through the openings. 《庄子·养生主》</span></blockquote></div>' +
       '<div class="goal"><svg viewBox="0 0 52 52" width="72" height="72" aria-hidden="true"><circle cx="26" cy="26" r="22" class="ring-bg"/><circle cx="26" cy="26" r="22" class="ring-fg" stroke-dasharray="' + (C * ring).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 26 26)"/></svg><div class="goal-num"><b>' + dn + '</b>/' + DAILY_GOAL + '</div><p>今日目标</p></div>' +
-      '</section>' + daily +
+      '</section>' + daily + recHTML() +
       (BANK.meta && BANK.meta.sample ? '<p class="sample-note">' + esc(BANK.meta.label) + '</p>' : '') +
       '<h2 class="sec-title">练习 <span>Practice</span></h2><div class="modes">' +
       sets.map(s => { const pr = setProgress(s); return '<button class="mode" data-set="' + s.id + '"><span class="mode-t">' + esc(s.title) + '</span><span class="mode-en">' + esc(s.en) + '</span><span class="mode-d">' + esc(s.desc) + '</span><span class="meter" aria-label="完成 ' + pr.d + ' / ' + pr.n + '"><i style="width:' + (pr.n ? pr.d / pr.n * 100 : 0) + '%"></i></span><span class="mode-n">' + pr.d + ' / ' + pr.n + '</span></button>'; }).join('') +
@@ -288,6 +350,7 @@
     m.querySelectorAll('[data-start-item]').forEach(b => b.onclick = () => startSession({ mode: 'single', ids: [b.dataset.startItem], title: '今日一句' }));
     const bb = m.querySelector('[data-boss]'); if (bb) bb.onclick = startBoss;
     const rv = m.querySelector('[data-review]'); if (rv) rv.onclick = () => go('review');
+    const rg = $('#rec-go'); if (rg) rg.onclick = startRec;
   }
   function startSet(id) {
     const set = setById(id); if (!set) return;
@@ -355,7 +418,7 @@
   function loadItem() {
     const it = ITEM[sess.ids[sess.idx]];
     const P = parseTree(it.tree, it.lang);
-    Object.assign(sess, { item: it, P, queue: bfs(P.root), qi: 0, done: new Set(), depth: depthMap(P.root), cuts: new Set(), rel: null, tries: 0, hint: false, revealed: false, itemMistakes: 0, itemXP: 0, itemHints: 0, finished: false, fb: null, fresh: null });
+    Object.assign(sess, { item: it, P, queue: bfs(P.root), qi: 0, done: new Set(), depth: depthMap(P.root), cuts: new Set(), rel: null, tries: 0, hint: false, revealed: false, itemMistakes: 0, itemXP: 0, itemHints: 0, finished: false, fb: null, fresh: null, nlog: [], curLog: null, relWrong: 0 });
   }
   const curNode = () => sess.queue[sess.qi];
 
@@ -419,14 +482,111 @@
     const nb = $('#pv-next-node'); if (nb) nb.onclick = () => advanceNode(0);
     m.querySelectorAll('[data-act]').forEach(b => b.onclick = () => finishAction(b.dataset.act));
   }
+
+  /* ---------------- attempt log & targeted feedback ---------------- */
+  function nodeLog() {
+    if (!sess.curLog) {
+      const n = curNode(), P = sess.P, sp = brSpans(P, n), roles = rolesFor(n);
+      sess.curLog = { rel: n.rel, layer: sess.depth.get(n) + 1, seg: spanText(P, n.s, n.e), ans: n.children.map((c, k) => spanText(P, sp[k][0], sp[k][1]) + '(' + roles[k] + ')').join('｜'), tries: [], hint: false, reveal: false };
+    }
+    return sess.curLog;
+  }
+  function segTexts(P, n, cuts) { const b = [n.s].concat([...cuts].sort((x, y) => x - y), [n.e]); return b.slice(0, -1).map((a, i) => spanText(P, a, b[i + 1])); }
+  function unitSpans(P) {
+    const set = new Set();
+    (function w(nd) { set.add(nd.s + '-' + nd.e); const sp = brSpans(P, nd); nd.children.forEach((c, k) => { set.add(sp[k][0] + '-' + sp[k][1]); set.add(c.s + '-' + c.e); if (c.type === 'node') w(c); }); })(P.root);
+    return set;
+  }
+  function ownerOf(P, from, g) { // the descendant node whose own layer contains cut g
+    let hit = null;
+    (function w(nd) { if (hit) return; if (nd !== from && expCuts(P, nd).includes(g)) { hit = nd; return; } nd.children.forEach(c => { if (c.type === 'node' && c.s < g && g < c.e + 1) w(c); }); })(from);
+    return hit;
+  }
+  const q = t => '「' + esc(t) + '」';
+  function explainCuts(n, sel) {
+    const P = sess.P, exp = expCuts(P, n), E = new Set(exp), sp = brSpans(P, n);
+    const cuts = [...sel].sort((a, b) => a - b);
+    const extra = cuts.filter(g => !E.has(g)), missing = exp.filter(g => !sel.has(g));
+    const out = [];
+    extra.forEach(g => {
+      const k = sp.findIndex(([a, b]) => a < g && g < b); if (k < 0) return;
+      const unit = spanText(P, sp[k][0], sp[k][1]);
+      const own = ownerOf(P, n, g);
+      let m = '你在' + q(spanText(P, sp[k][0], g)) + '和' + q(spanText(P, g, sp[k][1])) + '之间下了刀，切进了' + q(unit) + '的内部。在这一层，' + q(unit) + '是一个整体';
+      if (own) { const lay = sess.depth.get(own) + 1, roles = rolesFor(own); m += '，这一刀要到<b>第 ' + lay + ' 层</b>才切（' + roles.join('｜') + '）。先切大块，再切小块。'; }
+      else m += '，不能切开。';
+      out.push(m);
+    });
+    // pieces the student produced that are not real units
+    const units = unitSpans(P);
+    const b = [n.s].concat(cuts, [n.e]);
+    for (let i = 0; i < b.length - 1 && out.length < 3; i++) {
+      const a = b[i], e = b[i + 1];
+      if (units.has(a + '-' + e)) continue;
+      const over = n.children.map((c, k) => k).filter(k => sp[k][0] < e && sp[k][1] > a);
+      const broken = over.filter(k => sp[k][0] < a || sp[k][1] > e);
+      if (over.length > 1 && broken.length) {
+        out.push(q(spanText(P, a, e)) + '不是一个结构单位：它横跨了' + over.map(k => q(spanText(P, sp[k][0], sp[k][1]))).join('和') + '，又把' + broken.map(k => q(spanText(P, sp[k][0], sp[k][1]))).join('、') + '拆开了，结构上不能成立。');
+      }
+    }
+    if (missing.length && !extra.length) {
+      missing.forEach(g => {
+        const i = b.findIndex((x, j) => j < b.length - 1 && x < g && g < b[j + 1]);
+        const piece = spanText(P, b[i], b[i + 1]);
+        let m = '你切出的' + q(piece) + '里还包含两个直接成分，在这一层就要分开';
+        if (sess.tries >= 2) m += '：分界线在' + q(spanText(P, b[i], g)) + '和' + q(spanText(P, g, b[i + 1])) + '之间。';
+        else m += '。想一想：它里面哪两块是直接组合的？';
+        out.push(m);
+      });
+    }
+    if (!out.length) out.push('切的位置不对。切开后，每一部分都要能单独成立，意思也要和原句一致。');
+    return '<ul class="fb-list">' + out.map(x => '<li>' + x + '</li>').join('') + '</ul>';
+  }
+  const strip = t => t.replace(/[的地得了着]$/, '');
+  const ends = (t, ch) => ch.includes(t.slice(-1));
+  const WHYNOT = {
+    主谓: (A, B, zh) => zh ? '主语和谓语之间能插入“是不是”。读一读：' + q(A + '是不是' + B) + '——说得通吗？主语要是被陈述的对象。' : '主谓要求' + q(A) + '是被陈述的对象（主语），' + q(B) + '是对它的陈述（谓语）。' + q(A) + '能当主语吗？',
+    述宾: (A, B, zh) => zh && !ends(A, '了着') ? '述语和宾语之间能带“了”。读一读：' + q(A + '了' + B) + '——说得通吗？' + q(B) + '应该是' + q(A) + '这个动作支配的对象。' : '述宾要求' + q(A) + '是动作，' + q(B) + '是这个动作直接支配的对象。' + q(B) + '是' + q(A) + '的对象吗？',
+    述补: (A, B, zh) => zh && !ends(A, '得') ? '述补之间往往能插入“得”。读一读：' + q(A + '得' + B) + '——说得通吗？补语要说明动作的结果、程度或趋向。' : '述补要求' + q(B) + '补充说明' + q(A) + '的结果、程度或趋向（英语为补足语）。',
+    定中: (A, B, zh) => zh && !ends(A, '的') ? '定语和中心语之间大多能加“的”。读一读：' + q(A + '的' + B) + '——意思还一样吗？中心语' + q(B) + '必须是名词性的。' : '定中要求中心语是名词性的，另一部分修饰它。' + (zh ? q(B) + '是名词性的吗？' : '这里有名词性的中心语吗？'),
+    状中: (A, B, zh) => zh && !ends(A, '地') ? '状语和中心语之间大多能加“地”。读一读：' + q(strip(A) + '地' + B) + '——说得通吗？中心语' + q(B) + '必须是动词或形容词。' : '状中要求中心语是动词或形容词，另一部分修饰它。' + (zh ? q(B) + '是动词或形容词吗？' : ''),
+    并列: (A, B, zh) => zh ? '并列的两部分地位平等，能插“和”、能互换。读一读：' + q(B + '和' + A) + '——意思还一样吗？' : '并列要求两部分地位平等，可以互换位置。' + q(A) + '和' + q(B) + '是平等的吗？',
+    连动: (A, B) => '连动要求' + q(A) + '和' + q(B) + '都是动作，而且是同一个主语先后做的。是这样吗？',
+    介宾: (A) => '介宾要求' + q(A) + '是介词（在、把、朝、被、by、with……）。' + q(A) + '是介词吗？',
+    方位: (A, B) => '方位要求' + q(B) + '是方位词（上、里、中、前、后……）。' + q(B) + '是方位词吗？',
+    数量: (A, B) => '数量要求' + q(A) + '是数词或“这、那”，' + q(B) + '是量词。这里是吗？'
+  };
+  const ACTUAL = {
+    主谓: (A, B) => '实际上，「' + A + '」是被陈述的对象，「' + B + '」说明它怎么样或做什么。',
+    述宾: (A, B) => '实际上，「' + A + '」是动作，「' + B + '」是它支配的对象。',
+    述补: (A, B) => '实际上，「' + B + '」补充说明「' + A + '」的结果、程度、趋向或数量。',
+    定中: (A, B, rev) => rev ? '实际上，「' + B + '」放在后面，修饰名词性的「' + A + '」（中｜定）。' : '实际上，「' + A + '」修饰名词性的中心语「' + B + '」。',
+    状中: (A, B, rev) => rev ? '实际上，「' + B + '」放在后面，修饰「' + A + '」（中｜状）。' : '实际上，「' + A + '」修饰动词或形容词「' + B + '」。',
+    并列: (A, B) => '实际上，「' + A + '」和「' + B + '」地位平等，不分主次。',
+    连动: (A, B) => '实际上，「' + A + '」和「' + B + '」是同一个主语先后做的动作。',
+    介宾: (A, B) => '实际上，「' + A + '」是介词，「' + B + '」是它的宾语。',
+    方位: (A, B) => '实际上，「' + B + '」是方位词，附在「' + A + '」后面。',
+    数量: (A, B) => '实际上，「' + A + '」是数词或指示词，「' + B + '」是量词。'
+  };
+  function explainRel(picked, n, deep) {
+    const P = sess.P, sp = brSpans(P, n);
+    const A = spanText(P, sp[0][0], sp[0][1]), B = spanText(P, sp[1][0], sp[1][1]);
+    let h = '<p>为什么不是“' + REL[picked].zh + '”？' + WHYNOT[picked](A, B, P.lang === 'zh') + '</p>';
+    if (deep) h += '<p>' + esc(ACTUAL[n.rel](A, B, n.rev)) + '</p>';
+    else h += '<p class="fb-note">再看看' + q(A) + '和' + q(B) + '之间到底是什么关系。</p>';
+    return h;
+  }
+
   function submit() {
-    const n = curNode();
+    const n = curNode(), P = sess.P;
     if (!sess.cuts.size) { setFb('info', '先在词语之间点一下，切出这一层的直接成分。'); return; }
     if (!sess.rel) { setFb('info', '切好了，再从下面选出结构关系。'); return; }
-    const exp = new Set(expCuts(sess.P, n));
+    const exp = new Set(expCuts(P, n));
     const extra = [...sess.cuts].filter(g => !exp.has(g)), missing = [...exp].filter(g => !sess.cuts.has(g));
     const cutsOK = !extra.length && !missing.length, relOK = sess.rel === n.rel;
     sess.tries++;
+    const err = cutsOK ? (relOK ? 'ok' : 'rel') : (extra.length && !missing.length ? 'extra' : (!extra.length ? 'missing' : 'wrong'));
+    nodeLog().tries.push({ cut: segTexts(P, n, sess.cuts).join('｜'), rel: sess.rel, err });
     if (cutsOK && relOK) {
       let pts;
       if (sess.mode === 'boss') {
@@ -438,23 +598,17 @@
       return;
     }
     sess.itemMistakes++; if (sess.mode === 'boss') { sess.combo = 0; sess.bossMistakes++; }
-    let msg;
-    if (!cutsOK) {
-      if (extra.length && !missing.length) msg = '多切了' + extra.length + '刀。' + (exp.size === 1 ? '这一层只需要一刀：先找直接组合的两大块。' : '有的地方属于下一层。');
-      else if (missing.length && !extra.length) msg = '还差' + missing.length + '刀。这一层不止' + (sess.cuts.size + 1) + '段。';
-      else msg = '切的位置不对。问问自己：切开后，每一部分还能单独成立吗？意思和原句一样吗？';
-      if (sess.rel && relOK) msg += ' （关系先不评。）';
-    } else {
-      const key = [sess.rel, n.rel].sort().join('|');
-      msg = '<b>切对了！</b>关系再想想。' + (PAIR_HINT[key] || ('你选了“' + REL[sess.rel].zh + '”：' + REL[sess.rel].test + ' 这里符合吗？'));
-    }
+    if (err === 'rel') { S.conf[sess.rel + '>' + n.rel] = (S.conf[sess.rel + '>' + n.rel] || 0) + 1; sess.relWrong++; }
+    let html;
+    if (!cutsOK) html = explainCuts(n, sess.cuts) + (relOK ? '<p class="fb-note">关系先不评，切对了再看。</p>' : '');
+    else html = '<p><b>切对了！</b>但关系不对。</p>' + explainRel(sess.rel, n, sess.relWrong >= 2);
     if (sess.mode === 'boss' && sess.tries >= 2) { reveal(); return; }
-    if (sess.mode !== 'boss' && sess.tries === 2) msg += ' 实在想不出，可以点“看答案”。';
-    setFb('err', msg);
+    if (sess.mode !== 'boss' && sess.tries === 2) html += '<p class="fb-note">实在想不出，可以点“看答案”。</p>';
+    setFb('err', html);
   }
   function setFb(kind, html) { sess.fb = { kind, html }; renderPractice(); }
   function hint() {
-    const n = curNode(); sess.hint = true; sess.itemHints++;
+    const n = curNode(); sess.hint = true; sess.itemHints++; nodeLog().hint = true;
     const parts = n.children.length;
     let h = '这一层要切成 <b>' + parts + '</b> 段（' + (parts - 1) + ' 刀）。';
     if (sess.qi === 0 && sess.item.hint) h += ' ' + esc(sess.item.hint);
@@ -463,16 +617,20 @@
   }
   function reveal() {
     const n = curNode();
-    sess.cuts = new Set(expCuts(sess.P, n)); sess.rel = n.rel; sess.revealed = true;
+    sess.cuts = new Set(expCuts(sess.P, n)); sess.rel = n.rel; sess.revealed = true; nodeLog().reveal = true;
     const roles = rolesFor(n);
     const sp = brSpans(sess.P, n);
     const parts = n.children.map((c, k) => '<b>' + esc(spanText(sess.P, sp[k][0], sp[k][1])) + '</b>（' + roles[k] + '）').join(' ｜ ');
-    sess.fb = { kind: 'info', html: '答案：' + parts + ' — ' + REL[n.rel].zh + '。' + REL[n.rel].test };
+    const A = spanText(sess.P, sp[0][0], sp[0][1]), B = spanText(sess.P, sp[1][0], sp[1][1]);
+    sess.fb = { kind: 'info', html: '答案：' + parts + ' — ' + REL[n.rel].zh + '。' + esc(ACTUAL[n.rel](A, B, n.rev)) };
     if (sess.mode === 'boss') sess.fb.html = '两次未中，看看答案：' + parts + ' — ' + REL[n.rel].zh + '。';
     renderPractice();
   }
   function advanceNode(pts) {
     const n = curNode();
+    const L = nodeLog(); const first = L.tries.length === 1 && L.tries[0].err === 'ok' && !L.hint && !L.reveal;
+    const st = S.rel[n.rel] || (S.rel[n.rel] = { n: 0, h: [] }); st.n++; st.h.push(first ? 1 : 0); if (st.h.length > 20) st.h.shift();
+    sess.nlog.push(L); sess.curLog = null; sess.relWrong = 0;
     sess.done.add(n); sess.fresh = n; sess.itemXP += pts; if (sess.mode !== 'boss') sess.xpGain += pts;
     sess.qi++; sess.cuts = new Set(); sess.rel = null; sess.tries = 0; sess.hint = false; sess.fb = null;
     const wasRevealed = sess.revealed; sess.revealed = false;
@@ -492,6 +650,11 @@
     if (!clean) S.mistakes[it.id] = today();
     else if (S.mistakes[it.id]) { delete S.mistakes[it.id]; if (sess.mode === 'review') S.stats.reviewed++; }
     sess.itemXP += bonus;
+    S.log.push({ id: it.id, t: Date.now(), m: sess.mode, set: it.setId, x: itemText(it), c: clean ? 1 : 0, n: sess.nlog.map(l => {
+      const r = { r: l.rel, k: l.tries.length }; if (l.hint) r.h = 1; if (l.reveal) r.v = 1;
+      if (l.tries.length > 1 || l.hint || l.reveal || (l.tries[0] && l.tries[0].err !== 'ok')) { r.seg = l.seg; r.ans = l.ans; r.tr = l.tries; r.L = l.layer; }
+      return r; }) });
+    if (S.log.length > LOG_MAX) S.log.splice(0, S.log.length - LOG_MAX);
     if (sess.mode === 'boss') { sess.results.push({ clean }); }
     else { sess.xpGain += bonus; sess.results.push({ clean, xp: sess.itemXP }); addXP(sess.itemXP); }
     checkBadges(); save(); renderHeader();
@@ -565,6 +728,8 @@
       '<section class="lvl"><p class="eyebrow">等级 ' + (li + 1) + ' / ' + LEVELS.length + '</p><h2 class="lvl-name">' + L.name + '</h2><blockquote class="motto">' + L.q + '<span>' + L.en + '</span></blockquote>' +
       '<ol class="lvl-track">' + LEVELS.map((l, i) => '<li class="' + (i <= li ? 'on' : '') + '"><b>' + l.name + '</b><small>' + l.xp + '</small></li>').join('') + '</ol></section>' +
       '<dl class="sum-stats"><div><dt>总经验</dt><dd>' + S.xp + '</dd></div><div><dt>完成句子</dt><dd>' + S.stats.sent + '</dd></div><div><dt>一次切对率</dt><dd>' + acc + '%</dd></div><div><dt>连续天数</dt><dd>' + streakNow() + '</dd></div></dl>' +
+      masteryHTML() +
+      '<section class="export"><h2 class="sec-title">学习记录 <span>Report for your teacher</span></h2><p class="page-sub">生成一份 PDF，列出你做过的题、错在哪里、各种关系的掌握情况，发给老师。</p><button class="btn primary" id="me-report">生成学习记录 PDF</button></section>' +
       '<h2 class="sec-title">徽章 <span>Badges</span></h2><div class="badges">' + BADGES.map(b => '<div class="bd' + (S.badges[b.id] ? ' earned' : '') + '"><div class="badge' + (S.badges[b.id] ? ' earned' : '') + '"><span>' + b.g + '</span></div><b>' + b.name + '</b><small>' + b.desc + '</small></div>').join('') + '</div>' +
       '<div class="me-links"><button class="btn" id="me-review">错题本（' + Object.keys(S.mistakes).filter(id => ITEM[id]).length + '）</button><button class="btn" id="me-teacher">教师工具</button><button class="btn ghost danger" id="me-reset">重置进度</button></div><div id="reset-zone"></div>' +
       '<p class="fine">进度只保存在这台设备的浏览器里，不收集任何个人资料。</p>';
@@ -572,11 +737,128 @@
   function bindMe() {
     $('#me-review').onclick = () => go('review');
     $('#me-teacher').onclick = () => go('teacher');
+    $('#me-report').onclick = () => go('report');
     $('#me-reset').onclick = () => {
       $('#reset-zone').innerHTML = '<div class="confirm"><p>确定清除这台设备上的全部进度？此操作无法撤销。</p><div class="actions"><button class="btn" id="rs-no">取消</button><button class="btn danger" id="rs-yes">清除</button></div></div>';
       $('#rs-no').onclick = () => { $('#reset-zone').innerHTML = ''; };
       $('#rs-yes').onclick = () => { S = DEF(); save(); go('me'); toast('进度已清除'); };
     };
+  }
+
+
+  /* ---------------- PDF learning log ---------------- */
+  const LIBS = ['https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'];
+  function loadScript(src) { return new Promise((res, rej) => { if (document.querySelector('script[src="' + src + '"]')) return res(); const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('load')); document.head.appendChild(el); }); }
+  const ERR_ZH = { extra: '切太深／多切', missing: '漏切', wrong: '切分位置错', rel: '关系判断错' };
+  const MODE_ZH = { practice: '练习', single: '今日一句', review: '错题本', boss: '辨析挑战', rec: '推荐练习' };
+  function fmtDT(t) { const d = new Date(t); return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function reportData(range) {
+    const now = Date.now();
+    const from = range === 'week' ? now - 7 * 864e5 : range === 'since' ? (S.lastExport || 0) : 0;
+    const E = S.log.filter(e => e.t >= from);
+    const per = {}; REL_ORDER.forEach(r => { per[r] = { n: 0, ok: 0 }; });
+    const errs = { extra: 0, missing: 0, wrong: 0, rel: 0 }, conf = {}; let nodes = 0, first = 0, hints = 0, reveals = 0;
+    const days = new Set();
+    E.forEach(e => {
+      days.add(dstr(new Date(e.t)));
+      e.n.forEach(nd => {
+        nodes++; const p = per[nd.r] || (per[nd.r] = { n: 0, ok: 0 }); p.n++;
+        const ok1 = nd.k === 1 && !nd.h && !nd.v && (!nd.tr || nd.tr[0].err === 'ok');
+        if (ok1) { first++; p.ok++; }
+        if (nd.h) hints++; if (nd.v) reveals++;
+        (nd.tr || []).forEach(t => { if (errs[t.err] != null) errs[t.err]++; if (t.err === 'rel') { const key = t.rel + '>' + nd.r; conf[key] = (conf[key] || 0) + 1; } });
+      });
+    });
+    return { E, from, per, errs, conf, nodes, first, hints, reveals, days: days.size, clean: E.filter(e => e.c).length };
+  }
+  function reportHTML() {
+    return '<button class="back" data-back>‹ 我的</button><h1 class="page-title">学习记录 <span>PDF report</span></h1>' +
+      '<p class="page-sub">填好姓名和班级，选择时间范围，生成 PDF 后发给老师。姓名只写在这份 PDF 里，不会上传到任何地方。</p>' +
+      '<form class="rp-form" id="rp-form"><div class="tt-row"><label for="rp-name">姓名</label><input id="rp-name" autocomplete="name" value="' + esc(S.profile.name) + '"><label for="rp-cls">班级</label><input id="rp-cls" value="' + esc(S.profile.cls) + '"></div>' +
+      '<fieldset class="rp-range"><legend>时间范围</legend>' +
+      '<label><input type="radio" name="rp-r" value="all" checked> 全部记录</label>' +
+      '<label><input type="radio" name="rp-r" value="week"> 最近 7 天</label>' +
+      '<label><input type="radio" name="rp-r" value="since"' + (S.lastExport ? '' : ' disabled') + '> 上次导出以后' + (S.lastExport ? '（' + fmtDT(S.lastExport) + '）' : '') + '</label></fieldset>' +
+      '<p class="rp-count" id="rp-count"></p><div class="actions"><button class="btn primary" type="submit" id="rp-go">生成 PDF</button></div></form>' +
+      '<div id="rp-out" aria-live="polite"></div><div id="rp-stage" aria-hidden="true"></div>';
+  }
+  function bindReport() {
+    $('#main').querySelector('[data-back]').onclick = () => go('me');
+    const range = () => (document.querySelector('input[name="rp-r"]:checked') || {}).value || 'all';
+    const upd = () => { const D = reportData(range()); $('#rp-count').textContent = D.E.length ? '这份记录包含 ' + D.E.length + ' 句、' + D.nodes + ' 刀。' : '这个范围内还没有练习记录。'; $('#rp-go').disabled = !D.E.length; };
+    document.querySelectorAll('input[name="rp-r"]').forEach(r => r.addEventListener('change', upd)); upd();
+    $('#rp-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      S.profile.name = $('#rp-name').value.trim(); S.profile.cls = $('#rp-cls').value.trim(); save();
+      if (!S.profile.name) { $('#rp-out').innerHTML = '<div class="fb err">请先填写姓名，老师才知道是谁的记录。</div>'; $('#rp-name').focus(); return; }
+      const btn = $('#rp-go'); btn.disabled = true; btn.textContent = '正在生成…';
+      $('#rp-out').innerHTML = '<div class="fb info">正在生成 PDF，句子较多时需要十几秒。</div>';
+      try {
+        const D = reportData(range());
+        const blob = await buildPDF(D);
+        const fname = '层次分析记录_' + (S.profile.cls ? S.profile.cls + '_' : '') + S.profile.name + '_' + today().replace(/-/g, '') + '.pdf';
+        const url = URL.createObjectURL(blob);
+        const file = (typeof File === 'function') ? new File([blob], fname, { type: 'application/pdf' }) : null;
+        const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
+        S.lastExport = Date.now(); save();
+        $('#rp-out').innerHTML = '<div class="rp-done"><p><b>PDF 已生成</b>（' + Math.max(1, Math.round(blob.size / 1024)) + ' KB）：' + esc(fname) + '</p><div class="actions">' +
+          (canShare ? '<button class="btn primary" id="rp-share">发送给老师</button>' : '') +
+          '<a class="btn' + (canShare ? '' : ' primary') + '" id="rp-dl" href="' + url + '" download="' + esc(fname) + '">下载 PDF</a></div><p class="fine">下载后，可以通过电邮、Teams 或 SLS 交给老师。</p></div>';
+        const sh = $('#rp-share'); if (sh) sh.onclick = () => navigator.share({ files: [file], title: '层次分析学习记录', text: S.profile.name + ' 的层次分析学习记录' }).catch(() => {});
+      } catch (err) {
+        $('#rp-out').innerHTML = '<div class="fb err">生成失败：需要联网下载 PDF 工具（第一次使用时）。请连上网络再试一次。</div>';
+      }
+      btn.disabled = false; btn.textContent = '生成 PDF';
+    });
+  }
+  function rpBlocks(D) {
+    const L = LEVELS[levelOf(S.xp)];
+    const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+    const rangeTxt = D.from ? fmtDT(D.from) + ' 至 ' + fmtDT(Date.now()) : '全部记录（至 ' + fmtDT(Date.now()) + '）';
+    const blocks = [];
+    blocks.push('<div class="rb-head"><div class="rb-brand">庖丁 · 层次分析学习记录</div><div class="rb-meta"><span>姓名：<b>' + esc(S.profile.name) + '</b></span><span>班级：<b>' + esc(S.profile.cls || '—') + '</b></span><span>范围：' + rangeTxt + '</span></div></div>' +
+      '<div class="rb-stats">' + [['完成句子', D.E.length], ['零失误句子', D.clean + '（' + pct(D.clean, D.E.length) + '）'], ['一次切对率', pct(D.first, D.nodes) + '（' + D.first + '/' + D.nodes + ' 刀）'], ['练习天数', D.days], ['使用提示／看答案', D.hints + ' / ' + D.reveals], ['当前等级', L.name + ' · ' + S.xp + ' XP']].map(([a, b]) => '<div><span>' + a + '</span><b>' + b + '</b></div>').join('') + '</div>');
+    const weak = REL_ORDER.filter(r => D.per[r].n >= 1).map(r => ({ r, m: D.per[r].ok / D.per[r].n })).filter(x => x.m < 0.8).sort((a, b) => a.m - b.m);
+    const conf = Object.entries(D.conf).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const topErr = Object.entries(D.errs).sort((a, b) => b[1] - a[1]).filter(x => x[1]);
+    blocks.push('<div class="rb-sec">老师速览</div><div class="rb-glance"><p><b>需要加强：</b>' + (weak.length ? weak.map(x => (REL[x.r].chip || REL[x.r].zh) + '（' + Math.round(x.m * 100) + '%，' + D.per[x.r].n + ' 刀）').join('、') : '暂无明显弱项') + '</p>' +
+      '<p><b>主要错误类型：</b>' + (topErr.length ? topErr.map(([k, v]) => ERR_ZH[k] + ' ' + v + ' 次').join('、') : '无') + '</p>' +
+      '<p><b>常见混淆：</b>' + (conf.length ? conf.map(([k, v]) => { const [a, b] = k.split('>'); return '把' + (REL[b].chip || REL[b].zh) + '判断成' + (REL[a].chip || REL[a].zh) + ' ×' + v; }).join('；') : '无') + '</p></div>');
+    blocks.push('<div class="rb-sec">各关系掌握情况</div><table class="rb-tab"><thead><tr><th>关系</th><th>练习刀数</th><th>一次答对</th><th>答对率</th></tr></thead><tbody>' +
+      REL_ORDER.map(r => { const p = D.per[r]; const m = p.n ? p.ok / p.n : null; return '<tr><td>' + REL[r].zh + '</td><td>' + p.n + '</td><td>' + p.ok + '</td><td class="' + mcls(m) + '">' + pct(p.ok, p.n) + '</td></tr>'; }).join('') + '</tbody></table>');
+    blocks.push('<div class="rb-sec">作答明细（按时间顺序）</div><p class="rb-note">✓ 零失误　✗ 有失误。有失误的句子列出每一层的作答过程：学生的切分与关系判断，以及正确答案。</p>');
+    D.E.forEach((e, i) => {
+      const set = setById(e.set);
+      let h = '<div class="rb-item ' + (e.c ? 'ok' : 'bad') + '"><div class="rb-line"><span class="rb-no">' + (i + 1) + '</span><span class="rb-mk">' + (e.c ? '✓' : '✗') + '</span><span class="rb-x">' + esc(e.x) + '</span><span class="rb-src">' + esc(set ? set.title : '') + ' · ' + (MODE_ZH[e.m] || '') + ' · ' + fmtDT(e.t) + '</span></div>';
+      const bad = e.n.filter(nd => nd.tr);
+      if (bad.length) {
+        h += '<div class="rb-nodes">' + bad.map(nd => '<div class="rb-node"><div>第 ' + nd.L + ' 层「' + esc(nd.seg) + '」　正确：<b>' + esc(nd.ans) + '</b>　' + esc(REL[nd.r].zh) + (nd.h ? '　<i>用了提示</i>' : '') + (nd.v ? '　<i>看了答案</i>' : '') + '</div><ol>' +
+          nd.tr.filter(t => t.err !== 'ok').map(t => '<li>' + esc(t.cut) + '　〔' + esc(REL[t.rel] ? REL[t.rel].zh : t.rel) + '〕　— ' + ERR_ZH[t.err] + '</li>').join('') + '</ol></div>').join('') + '</div>';
+      }
+      blocks.push(h + '</div>');
+    });
+    return blocks;
+  }
+  async function buildPDF(D) {
+    for (const src of LIBS) await loadScript(src);
+    if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) { /* ignore */ } }
+    const stage = $('#rp-stage');
+    stage.innerHTML = rpBlocks(D).map(b => '<div class="rb">' + b + '</div>').join('');
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    const W = 595.28, H = 841.89, M = 36, CW = W - 2 * M, BOT = H - M - 12;
+    let y = M;
+    for (const el of stage.children) {
+      const cv = await window.html2canvas(el, { scale: 1.6, backgroundColor: '#ffffff', logging: false });
+      const h = cv.height * CW / cv.width;
+      if (y + h > BOT && y > M) { doc.addPage(); y = M; }
+      doc.addImage(cv.toDataURL('image/jpeg', 0.85), 'JPEG', M, y, CW, Math.min(h, BOT - M));
+      y += h + 6;
+    }
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(130); doc.text('Paoding IC analysis log  |  ' + today() + '  |  ' + i + ' / ' + pages, W / 2, H - 20, { align: 'center' }); }
+    stage.innerHTML = '';
+    return doc.output('blob');
   }
 
   /* ---------------- teacher tool ---------------- */

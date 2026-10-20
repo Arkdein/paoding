@@ -13,6 +13,9 @@ A gamified practice web app for 层次分析 (IC analysis) of Chinese and Englis
 | **概念卡** | 13 cards: IC basics, house cutting rules, the five relations plus 连动 / 介宾 / 方位 / 数量, and Chinese–English contrast. Each has worked diagrams and a 2-question check. |
 | **辨析挑战** | Timed boss round (6 items, 4 min): same words, different structures (狐狸狡猾 vs 狐狸的狡猾, 进口汽车, 咬死了猎人的狗…). Combos and a time bonus. |
 | **错题本** | Any sentence finished with a mistake, hint or reveal lands here. It is cleared by a clean redo. |
+| **为你推荐** | Tracks each student's first-try accuracy per relation (last 20 cuts each) and the pairs they confuse. Builds a 5-sentence round from the bank that targets weak relations, at a difficulty just above what they last completed cleanly. Mastery bars and top confusions show on 我的. |
+| **Targeted feedback** | Wrong cut: names the unit that was cut into, the layer where that cut actually belongs, and why the student's piece is not a valid constituent. Wrong relation: runs the chosen relation's test on the actual words (e.g. 「我了不认识……」 for 述宾); on a second miss, it explains the real relationship. |
+| **学习记录 PDF** | 我的 → 生成学习记录 PDF: students enter name and class and choose a range (all / last 7 days / since last export). The PDF has a 老师速览 summary, accuracy per relation, error types, common confusions, and every attempt with the student's cuts and relations next to the correct answer. On phones it opens the share sheet (email, Teams, WhatsApp); otherwise it downloads. The PDF tools load from cdnjs the first time, then work offline. |
 | **Gamification** | XP and five levels from 庖丁解牛 (学徒 → 族庖 → 良庖 → 庖丁 → 游刃有余), a daily goal of 5 sentences, a streak, 9 badges, and per-sentence verdicts (刀刃若新 / 良庖之刀 / 族庖之刀). |
 
 Progress lives only in each student's browser (`localStorage`). There are no logins and no personal data, so there are no PDPA concerns. Clearing browser data resets progress.

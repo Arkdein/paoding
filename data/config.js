@@ -3,5 +3,5 @@
  *         Leave it empty to hide the 问老师 button.
  */
 window.PD_CONFIG = {
-  askUrl: ''
+  askUrl: 'https://script.google.com/macros/s/AKfycbxLYUJyGktxVJtJsoRGDIMOQmmkD1TqO6qCRL-yqV0nDtaarVvCtxxFKq-Cf3cz_fVyFg/exec'
 };

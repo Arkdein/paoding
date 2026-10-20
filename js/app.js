@@ -404,7 +404,7 @@
     go('practice');
     if (sess.mode === 'boss') {
       bossTimer = setInterval(() => {
-        if (!sess || sess.over) return;
+        if (!sess || sess.over || !$('#ask').hidden) return;
         sess.timeLeft--; const el = $('#pv-timer'); if (el) { el.textContent = fmtTime(sess.timeLeft); el.classList.toggle('low', sess.timeLeft <= 30); }
         if (sess.timeLeft <= 0) endBoss(true);
       }, 1000);
@@ -430,7 +430,8 @@
     top += '</header>';
     const dots = '<div class="pv-dots" aria-hidden="true">' + sess.ids.map((_, i) => '<i class="' + (i < sess.idx ? (sess.results[i] && sess.results[i].clean ? 'ok' : 'done') : i === sess.idx ? 'now' : '') + '"></i>').join('') + '</div>';
     const gloss = it.gloss ? '<p class="gloss"><span>按这个意思切分</span>' + esc(it.gloss) + '</p>' : '';
-    let body = '<div class="pv-sentence">' + diagram(P, { done: sess.done, cur: sess.finished ? null : n, fresh: sess.fresh }) + '</div>';
+    const mean = it.mean ? '<p class="mean"><span>' + (it.lang === 'en' ? '中文意思' : 'Meaning') + '</span>' + esc(it.mean) + '<small>' + (it.lang === 'en' ? '只帮助理解句意，切分仍按英文结构。' : '英文只帮助理解句意，切分仍按中文结构。') + '</small></p>' : '';
+    let body = '<div class="pv-sentence">' + diagram(P, { done: sess.done, cur: sess.finished ? null : n, fresh: sess.fresh }) + mean + '</div>';
     body += sess.finished ? finishHTML() : cutterHTML();
     m.innerHTML = '<section class="pv">' + top + dots + gloss + body + '</section>';
     bindPractice();
@@ -460,10 +461,11 @@
       if (!boss && sess.tries >= 2) actions += '<button class="btn ghost" id="pv-reveal">看答案</button>';
       actions += '<button class="btn primary" id="pv-submit">确认这一刀</button>';
     }
+    const askLink = askOn() && sess.fb && sess.fb.kind !== 'ok' ? '<button class="ask-inline" id="pv-ask">有疑问？问老师</button>' : '';
     return '<div class="cutter-card"><p class="ct-label"><span class="layer">第 ' + layer + ' 层</span>点击词语之间的空隙下刀' + (n.children.length > 2 ? '' : '') + '</p>' +
       '<div class="cutter ' + P.lang + '" role="group" aria-label="切分区">' + cut + '</div>' +
       '<p class="ct-label">再判断切出的部分是什么关系</p><div class="rels">' + rels + '</div>' +
-      '<div aria-live="polite">' + fb + '</div><div class="actions">' + actions + '</div></div>';
+      '<div aria-live="polite">' + fb + askLink + '</div><div class="actions">' + actions + '</div></div>';
   }
   function bindPractice() {
     const m = $('#main');
@@ -480,6 +482,7 @@
     const hb = $('#pv-hint'); if (hb) hb.onclick = hint;
     const rb = $('#pv-reveal'); if (rb) rb.onclick = reveal;
     const nb = $('#pv-next-node'); if (nb) nb.onclick = () => advanceNode(0);
+    const pa = $('#pv-ask'); if (pa) pa.onclick = openAsk;
     m.querySelectorAll('[data-act]').forEach(b => b.onclick = () => finishAction(b.dataset.act));
   }
 
@@ -674,11 +677,12 @@
     const v = verdict(); const it = sess.item; const last = sess.idx + 1 >= sess.ids.length;
     return '<div class="cutter-card finish"><p class="eyebrow">完成</p><h2 class="verdict ' + v.cls + '">' + v.t + '</h2><p class="v-d">' + v.d + '</p><p class="v-xp">本句 <b>+' + sess.itemXP + ' XP</b>' + (sess.clean ? '（含零失误奖励 +15）' : '') + '</p>' +
       (it.note ? '<div class="note"><span class="eyebrow">中英对照</span><p>' + esc(it.note) + '</p></div>' : '') +
-      '<div class="actions">' + (last ? '<button class="btn" data-act="home">回首页</button><button class="btn primary" data-act="summary">本轮小结</button>' : '<button class="btn ghost" data-act="home">先到这里</button><button class="btn primary" data-act="next">下一句 ›</button>') + '</div></div>';
+      '<div class="actions">' + (askOn() ? '<button class="btn ghost" data-act="ask">问老师</button>' : '') + (last ? '<button class="btn" data-act="home">回首页</button><button class="btn primary" data-act="summary">本轮小结</button>' : '<button class="btn ghost" data-act="home">先到这里</button><button class="btn primary" data-act="next">下一句 ›</button>') + '</div></div>';
   }
   function finishAction(a) {
     if (a === 'next') { sess.idx++; loadItem(); renderPractice(); window.scrollTo(0, 0); }
     else if (a === 'home') go('home');
+    else if (a === 'ask') openAsk();
     else if (a === 'summary') roundSummary();
     else if (a === 'again') { if (sess.mode === 'boss') startBoss(); else go('home'); }
   }
@@ -861,6 +865,90 @@
     return doc.output('blob');
   }
 
+
+  /* ---------------- 问老师 (ask the teacher) ---------------- */
+  const CFG = window.PD_CONFIG || {};
+  const askOn = () => !!(CFG.askUrl && /^https:\/\//.test(CFG.askUrl));
+  function stripTags(h) { const d = document.createElement('div'); d.innerHTML = h || ''; return d.textContent.replace(/\s+/g, ' ').trim(); }
+  function askContext() {
+    const c = { view: view };
+    if (view === 'practice' && sess && sess.item) {
+      const it = sess.item, n = curNode();
+      c.item = it.id; c.set = (setById(it.setId) || {}).title || ''; c.mode = MODE_ZH[sess.mode] || sess.mode;
+      c.sentence = itemText(it) + (it.gloss ? '（意思：' + it.gloss + '）' : '');
+      if (n && !sess.finished) {
+        const L = nodeLog();
+        c.layer = '第 ' + L.layer + ' 层「' + L.seg + '」';
+        const now = sess.cuts.size ? segTexts(sess.P, n, sess.cuts).join('｜') : '（还没下刀）';
+        c.attempt = L.tries.map((t, i) => (i + 1) + '. ' + t.cut + '〔' + (REL[t.rel] ? REL[t.rel].zh : t.rel) + '〕' + (ERR_ZH[t.err] ? ' ' + ERR_ZH[t.err] : '')).concat(['当前：' + now + (sess.rel ? '〔' + REL[sess.rel].zh + '〕' : '')]).join('\n');
+        c.answer = L.ans + ' ' + REL[n.rel].zh;
+      } else { c.layer = '已完成整句'; c.answer = (sess.nlog || []).map(l => '第' + l.layer + '层 ' + l.ans).join('\n'); }
+      c.feedback = sess.fb ? stripTags(sess.fb.html) : '';
+    } else if (view === 'card') { const t = $('.concept .page-title'); c.sentence = '概念卡：' + (t ? t.textContent : ''); }
+    else { const t = $('.page-title'); c.sentence = t ? t.textContent : '首页'; }
+    return c;
+  }
+  let askShot = null;
+  async function openAsk() {
+    if (!askOn()) { toast('老师还没有开通提问功能'); return; }
+    const ctx = askContext(); askShot = null;
+    const ov = $('#ask');
+    ov.innerHTML = '<div class="ask-card" role="dialog" aria-modal="true" aria-labelledby="ask-t"><h2 id="ask-t" class="ask-title">问老师</h2>' +
+      '<p class="ask-ctx"><b>' + esc(ctx.sentence || '') + '</b>' + (ctx.layer ? '<br>' + esc(ctx.layer) : '') + '</p>' +
+      '<form id="ask-form"><div class="tt-row"><label for="ask-name">姓名</label><input id="ask-name" value="' + esc(S.profile.name) + '" required><label for="ask-cls">班级</label><input id="ask-cls" value="' + esc(S.profile.cls) + '"></div>' +
+      '<label for="ask-q" class="ask-l">你的问题</label><textarea id="ask-q" rows="4" required placeholder="例如：为什么这里是述补，不是述宾？"></textarea>' +
+      '<label class="ask-chk"><input type="checkbox" id="ask-shot" checked> 附上这一页的截图</label><div id="ask-thumb" class="ask-thumb">正在截图…</div>' +
+      '<p class="fine">你的姓名、问题、作答过程和截图会发送到老师的 Google 表格。</p>' +
+      '<div id="ask-msg" aria-live="polite"></div><div class="actions"><button type="button" class="btn ghost" id="ask-x">取消</button><button type="submit" class="btn primary" id="ask-send">发送</button></div></form></div>';
+    ov.hidden = false;
+    $('#ask-x').onclick = closeAsk;
+    setTimeout(() => $('#ask-q').focus(), 50);
+    // screenshot of the page underneath (taken before the dialog is painted over it)
+    (async () => {
+      try {
+        await loadScript(LIBS[0]);
+        const cv = await window.html2canvas($('#main'), { scale: Math.min(1.5, window.devicePixelRatio || 1), backgroundColor: getComputedStyle(document.body).backgroundColor, logging: false, windowWidth: document.documentElement.clientWidth });
+        let w = cv.width, h = cv.height; const maxH = 2400;
+        let src = cv;
+        if (h > maxH) { const c2 = document.createElement('canvas'); c2.width = w; c2.height = maxH; c2.getContext('2d').drawImage(cv, 0, 0); src = c2; }
+        askShot = src.toDataURL('image/jpeg', 0.72);
+        const th = $('#ask-thumb'); if (th) th.innerHTML = '<img alt="页面截图" src="' + askShot + '">';
+      } catch (e) { const th = $('#ask-thumb'); if (th) th.textContent = '截图失败，可以只发送文字。'; }
+    })();
+    $('#ask-shot').onchange = e => { $('#ask-thumb').hidden = !e.target.checked; };
+    $('#ask-form').onsubmit = async e => {
+      e.preventDefault();
+      const name = $('#ask-name').value.trim(), cls = $('#ask-cls').value.trim(), qtxt = $('#ask-q').value.trim();
+      if (!name || !qtxt) { $('#ask-msg').innerHTML = '<div class="fb err">请填写姓名和问题。</div>'; return; }
+      S.profile.name = name; S.profile.cls = cls; save();
+      const payload = Object.assign({ name, cls, q: qtxt, t: new Date().toISOString(), shot: $('#ask-shot').checked ? askShot : null }, ctx);
+      const btn = $('#ask-send'); btn.disabled = true; btn.textContent = '发送中…';
+      const res = await postAsk(payload);
+      if (res === 'ok') { closeAsk(); toast('已发送给老师'); }
+      else if (res === 'queued') { closeAsk(); toast('现在没有网络，连上网后会自动发送'); }
+      else { $('#ask-msg').innerHTML = '<div class="fb err">发送失败。请检查网络后再试，或直接问老师。</div>'; btn.disabled = false; btn.textContent = '发送'; }
+    };
+  }
+  function closeAsk() { const ov = $('#ask'); ov.hidden = true; ov.innerHTML = ''; }
+  async function postAsk(p) {
+    if (!navigator.onLine) { queueAsk(p); return 'queued'; }
+    try {
+      const r = await fetch(CFG.askUrl, { method: 'POST', body: JSON.stringify(p) });
+      const j = await r.json().catch(() => ({}));
+      return j && j.ok ? 'ok' : 'fail';
+    } catch (e) { if (!navigator.onLine) { queueAsk(p); return 'queued'; } return 'fail'; }
+  }
+  function queueAsk(p) { try { const k = 'paoding-outbox'; const q = JSON.parse(localStorage.getItem(k) || '[]'); q.push(p); localStorage.setItem(k, JSON.stringify(q.slice(-5))); } catch (e) { /* storage full: drop */ } }
+  async function flushAsk() {
+    if (!askOn() || !navigator.onLine) return;
+    let q; try { q = JSON.parse(localStorage.getItem('paoding-outbox') || '[]'); } catch (e) { return; }
+    if (!q.length) return;
+    const left = [];
+    for (const p of q) { const r = await postAsk(p); if (r !== 'ok') left.push(p); }
+    try { localStorage.setItem('paoding-outbox', JSON.stringify(left)); } catch (e) { /* ignore */ }
+    if (left.length < q.length) toast('之前保存的问题已发送给老师');
+  }
+
   /* ---------------- teacher tool ---------------- */
   function teacherHTML() {
     return '<button class="back" data-back>‹ 我的</button><h1 class="page-title">教师工具 <span>Item builder</span></h1>' +
@@ -913,9 +1001,12 @@
     if (v === 'boss') startBoss(); else go(v);
   }));
   $('#hd-home').addEventListener('click', e => { e.preventDefault(); go('home'); });
+  const askBtn = $('#hd-ask'); if (askBtn) { askBtn.hidden = !askOn(); askBtn.addEventListener('click', openAsk); }
+  window.addEventListener('online', flushAsk); setTimeout(flushAsk, 3000);
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !$('#ov').hidden) { ovQueue.shift(); showOverlay(); }
-    if (view === 'practice' && e.key === 'Enter' && e.target.tagName !== 'BUTTON') { const b = $('#pv-submit'); if (b) b.click(); }
+    if (e.key === 'Escape' && !$('#ask').hidden) closeAsk();
+    if (view === 'practice' && e.key === 'Enter' && $('#ask').hidden && e.target.tagName !== 'BUTTON') { const b = $('#pv-submit'); if (b) b.click(); }
   });
   window.addEventListener('hashchange', () => { const h = (location.hash || '').slice(1); if (['learn', 'me', 'teacher'].includes(h) && h !== view) go(h); });
   const h0 = (location.hash || '').slice(1);

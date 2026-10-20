@@ -28,6 +28,7 @@
       <a href="#me" data-v="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="9" r="4"/><path d="M4 20c1.5-4 4.5-5 8-5s6.5 1 8 5"/></svg>我的</a>
     </nav>
     <div class="hd-stats">
+      <button class="hd-ask" id="hd-ask" type="button" hidden aria-label="问老师"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M10 9a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.5"/><circle cx="12" cy="14.2" r=".6" fill="currentColor"/></svg><span>问老师</span></button>
       <div class="hd-lvl"><div class="hd-lvl-top"><b id="hd-level">学徒</b><span id="hd-xp">0 XP</span></div><div class="xpbar"><i id="hd-bar"></i></div></div>
       <div class="streak" title="连续练习天数"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c1 3.5 5 5.5 5 10.5A5 5 0 0 1 12 18a5 5 0 0 1-5-5.5c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3 0-6 1-9Z"/><path d="M6 20h12v2H6z"/></svg><span id="hd-streak">0</span><span class="sr">天连续</span></div>
     </div>
@@ -36,7 +37,9 @@
 <main id="main"></main>
 <div id="toast" role="status" hidden></div>
 <div id="ov" hidden></div>
+<div id="ask" hidden></div>
 <!--/SHELL-->
+<script src="data/config.js"></script>
 <script src="data/concepts.js"></script>
 <script src="data/bank.js"></script>
 <script src="js/app.js"></script>

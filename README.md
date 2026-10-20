@@ -16,6 +16,8 @@ A gamified practice web app for 层次分析 (IC analysis) of Chinese and Englis
 | **为你推荐** | Tracks each student's first-try accuracy per relation (last 20 cuts each) and the pairs they confuse. Builds a 5-sentence round from the bank that targets weak relations, at a difficulty just above what they last completed cleanly. Mastery bars and top confusions show on 我的. |
 | **Targeted feedback** | Wrong cut: names the unit that was cut into, the layer where that cut actually belongs, and why the student's piece is not a valid constituent. Wrong relation: runs the chosen relation's test on the actual words (e.g. 「我了不认识……」 for 述宾); on a second miss, it explains the real relationship. |
 | **学习记录 PDF** | 我的 → 生成学习记录 PDF: students enter name and class and choose a range (all / last 7 days / since last export). The PDF has a 老师速览 summary, accuracy per relation, error types, common confusions, and every attempt with the student's cuts and relations next to the correct answer. On phones it opens the share sheet (email, Teams, WhatsApp); otherwise it downloads. The PDF tools load from cdnjs the first time, then work offline. |
+| **句意** | Every sentence shows its meaning in the other language (English under Chinese sentences, Chinese under English ones), with a reminder that the cut still follows the sentence's own structure. For ambiguous items the meaning pins down the intended reading. |
+| **问老师** | Button in the header, under feedback, and on the completion card. It sends the student's question with their name and class, the sentence, the layer, every attempt, the correct answer, the feedback they saw, and a screenshot, all to your Google Sheet. Setup: [`apps-script/README-问老师.md`](apps-script/README-问老师.md). Hidden until `askUrl` is set in `data/config.js`. Questions typed offline are sent when the phone reconnects. |
 | **Gamification** | XP and five levels from 庖丁解牛 (学徒 → 族庖 → 良庖 → 庖丁 → 游刃有余), a daily goal of 5 sentences, a streak, 9 badges, and per-sentence verdicts (刀刃若新 / 良庖之刀 / 族庖之刀). |
 
 Progress lives only in each student's browser (`localStorage`). There are no logins and no personal data, so there are no PDPA concerns. Clearing browser data resets progress.
@@ -66,6 +68,8 @@ css/app.css            styles (light + dark)
 js/app.js              engine: parser, cutter, feedback, XP, badges, views
 data/bank.js           question bank   ← edit this
 data/concepts.js       concept cards   ← and this
+data/config.js         问老师 Sheet URL
+apps-script/           Google Apps Script for 问老师 + setup guide
 manifest.webmanifest   install-to-home-screen metadata
 sw.js                  offline cache (bump VERSION after edits)
 icons/                 app icons

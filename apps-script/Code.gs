@@ -41,8 +41,11 @@ function doGet(e) {
 
 /** Run once after pasting the code (▶ Run → setup): creates the sheets and the Drive folder, and grants permissions. */
 function setup() {
-  sheet_(Q_SHEET, Q_HEADERS);
-  sheet_(U_SHEET, U_HEADERS);
+  const q = sheet_(Q_SHEET, Q_HEADERS), u = sheet_(U_SHEET, U_HEADERS);
+  [[q, '时间'], [q, '回复时间'], [u, '时间']].forEach(([sh, h]) => {
+    const c = headers_(sh).indexOf(h) + 1;
+    if (c) sh.getRange(2, c, sh.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  });
   folder_();
 }
 
@@ -70,7 +73,7 @@ function ask_(d) {
     const bytes = Utilities.base64Decode(d.shot.split('base64,')[1]);
     const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
     const file = folder_().createFile(Utilities.newBlob(bytes, 'image/jpeg', stamp + '_' + clean_(d.cls) + '_' + clean_(d.name) + '_' + clean_(d.item || 'page') + '.jpg'));
-    shotCell = '=HYPERLINK("' + file.getUrl() + '","查看截图")';
+    shotCell = file.getUrl();
   }
   const id = Utilities.getUuid();
   sh.appendRow(rowFor_(sh, {

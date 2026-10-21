@@ -1,4 +1,22 @@
-# 问老师 — setting up the Google Sheet (about 5 minutes, once)
+# 问老师 & usage data — the Google Sheet backend
+
+## Upgrading to v2 (usage data + replies in the app)
+
+If you set up v1 already, you only need to replace the code:
+
+1. Open the sheet → **Extensions → Apps Script**.
+2. Select all of `Code.gs`, delete it, paste in the new [`Code.gs`](Code.gs), and click 💾 **Save**.
+3. Choose `setup` in the function dropdown → **▶ Run** (approve if asked). This adds the `使用记录` tab and the new 问题 columns if they are missing.
+4. **Deploy → Manage deployments → ✏ (Edit) → Version: New version → Deploy.** The URL stays the same, so the app keeps working.
+
+From then on:
+- Each student signs in once (name + class). Every completed sentence, card, boss round and PDF export is logged to `使用记录`.
+- **To reply:** type in the `老师回复` column of `问题`. The row turns `已回复` with a timestamp automatically, and the student sees the reply under 我的 → 我的提问 (with a red dot) the next time they open the app.
+- The teacher dashboard is a Claude dashboard that reads this sheet live through your Google Sheets connection.
+
+---
+
+# First-time setup (about 5 minutes, once)
 
 When a student taps **问老师**, the app sends their name, class and question, along with the sentence, the layer they were on, every attempt they made, the correct answer, the feedback they saw, and a screenshot of the page. Each question becomes one row in a Google Sheet. Screenshots are saved in a Drive folder and linked from the row.
 

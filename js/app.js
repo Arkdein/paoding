@@ -74,7 +74,7 @@
 
   /* ---------------- storage ---------------- */
   const KEY = 'paoding-v1';
-  const DEF = () => ({ xp: 0, done: {}, mistakes: {}, cards: {}, streak: { n: 0, last: '' }, daily: { date: '', n: 0 }, stats: { nodes: 0, first: 0, sent: 0, en: 0, clean: 0, reviewed: 0, bossBest: 0, bossPerfect: 0 }, badges: {}, rel: {}, conf: {}, log: [], profile: { name: '', cls: '' }, lastExport: 0 });
+  const DEF = () => ({ xp: 0, done: {}, mistakes: {}, cards: {}, streak: { n: 0, last: '' }, daily: { date: '', n: 0 }, stats: { nodes: 0, first: 0, sent: 0, en: 0, clean: 0, reviewed: 0, bossBest: 0, bossPerfect: 0 }, badges: {}, rel: {}, conf: {}, log: [], profile: { name: '', cls: '' }, lastExport: 0, device: '', lastOpen: '', inbox: [], inboxSeen: 0 });
   const LOG_MAX = 400;
   function load() {
     try {
@@ -84,6 +84,7 @@
     return DEF();
   }
   let S = load();
+  if (!S.device) { S.device = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } }
 
   /* ---------------- bank index ---------------- */
@@ -390,7 +391,7 @@
         if (oi === q.a) { b.classList.add('right'); fs.querySelector('.q-fb').textContent = '对了。'; right.add(qi); }
         else { b.classList.add('wrong'); fs.querySelector('.q-fb').textContent = '再想想，回到上面的说明找找线索。'; right.delete(qi); }
         if (right.size === c.quiz.length && !S.cards[c.id]) {
-          S.cards[c.id] = today(); addXP(20); checkBadges(); save(); renderHeader();
+          S.cards[c.id] = today(); addXP(20); checkBadges(); save(); renderHeader(); track({ type: 'card', item: c.id });
           m.querySelector('.collect').innerHTML = '<span class="chip ok">已收进卡册 +20 XP</span>';
         }
       });
@@ -658,6 +659,11 @@
       if (l.tries.length > 1 || l.hint || l.reveal || (l.tries[0] && l.tries[0].err !== 'ok')) { r.seg = l.seg; r.ans = l.ans; r.tr = l.tries; r.L = l.layer; }
       return r; }) });
     if (S.log.length > LOG_MAX) S.log.splice(0, S.log.length - LOG_MAX);
+    {
+      const ok1 = l => l.tries.length === 1 && l.tries[0].err === 'ok' && !l.hint && !l.reveal;
+      const confs = []; sess.nlog.forEach(l => { const seen = {}; l.tries.forEach(t => { if (t.err === 'rel' && !seen[t.rel]) { seen[t.rel] = 1; confs.push(t.rel + '>' + l.rel); } }); });
+      track({ type: 'sentence', item: it.id, text: itemText(it), set: it.setId, mode: sess.mode, clean: clean, nodes: sess.nlog.length, first: sess.nlog.filter(ok1).length, rels: sess.nlog.map(l => l.rel + (ok1(l) ? 1 : 0)).join(','), conf: confs.join(';'), level: LEVELS[levelOf(S.xp)].name });
+    }
     if (sess.mode === 'boss') { sess.results.push({ clean }); }
     else { sess.xpGain += bonus; sess.results.push({ clean, xp: sess.itemXP }); addXP(sess.itemXP); }
     checkBadges(); save(); renderHeader();
@@ -704,6 +710,7 @@
     if (best) S.stats.bossBest = total;
     if (perfect) S.stats.bossPerfect = (S.stats.bossPerfect || 0) + 1;
     const xp = Math.min(80, Math.round(total / 15)); addXP(xp);
+    track({ type: 'boss', score: total, clean: perfect, nodes: completed });
     checkBadges(); save(); renderHeader();
     $('#main').innerHTML = '<section class="summary boss-sum"><p class="eyebrow">歧义句挑战 · ' + (timeout ? '时间到' : all ? '全部完成' : '中途结束') + '</p><h1 class="page-title">' + total + ' 分' + (best ? ' <span class="chip ok">新纪录</span>' : '') + '</h1>' +
       '<dl class="sum-stats"><div><dt>完成</dt><dd>' + completed + ' / ' + sess.ids.length + '</dd></div><div><dt>最高连击</dt><dd>×' + sess.bestCombo + '</dd></div><div><dt>时间奖励</dt><dd>+' + timeBonus + '</dd></div><div><dt>获得</dt><dd>+' + xp + ' XP</dd></div></dl>' +
@@ -728,7 +735,8 @@
   function meHTML() {
     const li = levelOf(S.xp), L = LEVELS[li];
     const acc = S.stats.nodes ? Math.round(S.stats.first / S.stats.nodes * 100) : 0;
-    return '<h1 class="page-title">我的 <span>Progress</span></h1>' +
+    const reg = askOn() ? '<p class="me-reg">' + (S.profile.name ? '登记为 <b>' + esc(S.profile.name) + '</b>' + (S.profile.cls ? ' · ' + esc(S.profile.cls) : '') : '还没有登记') + ' <button class="ask-inline" id="me-reg">修改</button></p>' : '';
+    return '<h1 class="page-title">我的 <span>Progress</span></h1>' + reg + inboxHTML() +
       '<section class="lvl"><p class="eyebrow">等级 ' + (li + 1) + ' / ' + LEVELS.length + '</p><h2 class="lvl-name">' + L.name + '</h2><blockquote class="motto">' + L.q + '<span>' + L.en + '</span></blockquote>' +
       '<ol class="lvl-track">' + LEVELS.map((l, i) => '<li class="' + (i <= li ? 'on' : '') + '"><b>' + l.name + '</b><small>' + l.xp + '</small></li>').join('') + '</ol></section>' +
       '<dl class="sum-stats"><div><dt>总经验</dt><dd>' + S.xp + '</dd></div><div><dt>完成句子</dt><dd>' + S.stats.sent + '</dd></div><div><dt>一次切对率</dt><dd>' + acc + '%</dd></div><div><dt>连续天数</dt><dd>' + streakNow() + '</dd></div></dl>' +
@@ -736,16 +744,18 @@
       '<section class="export"><h2 class="sec-title">学习记录 <span>Report for your teacher</span></h2><p class="page-sub">生成一份 PDF，列出你做过的题、错在哪里、各种关系的掌握情况，发给老师。</p><button class="btn primary" id="me-report">生成学习记录 PDF</button></section>' +
       '<h2 class="sec-title">徽章 <span>Badges</span></h2><div class="badges">' + BADGES.map(b => '<div class="bd' + (S.badges[b.id] ? ' earned' : '') + '"><div class="badge' + (S.badges[b.id] ? ' earned' : '') + '"><span>' + b.g + '</span></div><b>' + b.name + '</b><small>' + b.desc + '</small></div>').join('') + '</div>' +
       '<div class="me-links"><button class="btn" id="me-review">错题本（' + Object.keys(S.mistakes).filter(id => ITEM[id]).length + '）</button><button class="btn" id="me-teacher">教师工具</button><button class="btn ghost danger" id="me-reset">重置进度</button></div><div id="reset-zone"></div>' +
-      '<p class="fine">进度只保存在这台设备的浏览器里，不收集任何个人资料。</p>';
+      '<p class="fine">' + (askOn() ? '你的姓名、班级和练习记录会发送到老师的 Google 表格，只有老师能看到。进度本身保存在这台设备上。' : '进度只保存在这台设备的浏览器里，不收集任何个人资料。') + '</p>';
   }
   function bindMe() {
     $('#me-review').onclick = () => go('review');
     $('#me-teacher').onclick = () => go('teacher');
     $('#me-report').onclick = () => go('report');
+    const mr = $('#me-reg'); if (mr) mr.onclick = () => showReg(true);
+    markInboxSeen();
     $('#me-reset').onclick = () => {
       $('#reset-zone').innerHTML = '<div class="confirm"><p>确定清除这台设备上的全部进度？此操作无法撤销。</p><div class="actions"><button class="btn" id="rs-no">取消</button><button class="btn danger" id="rs-yes">清除</button></div></div>';
       $('#rs-no').onclick = () => { $('#reset-zone').innerHTML = ''; };
-      $('#rs-yes').onclick = () => { S = DEF(); save(); go('me'); toast('进度已清除'); };
+      $('#rs-yes').onclick = () => { S = Object.assign(DEF(), { device: S.device, profile: S.profile, inbox: S.inbox, inboxSeen: S.inboxSeen }); save(); go('me'); toast('进度已清除'); };
     };
   }
 
@@ -804,7 +814,7 @@
         const url = URL.createObjectURL(blob);
         const file = (typeof File === 'function') ? new File([blob], fname, { type: 'application/pdf' }) : null;
         const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
-        S.lastExport = Date.now(); save();
+        S.lastExport = Date.now(); save(); track({ type: 'pdf' });
         $('#rp-out').innerHTML = '<div class="rp-done"><p><b>PDF 已生成</b>（' + Math.max(1, Math.round(blob.size / 1024)) + ' KB）：' + esc(fname) + '</p><div class="actions">' +
           (canShare ? '<button class="btn primary" id="rp-share">发送给老师</button>' : '') +
           '<a class="btn' + (canShare ? '' : ' primary') + '" id="rp-dl" href="' + url + '" download="' + esc(fname) + '">下载 PDF</a></div><p class="fine">下载后，可以通过电邮、Teams 或 SLS 交给老师。</p></div>';
@@ -921,10 +931,10 @@
       const name = $('#ask-name').value.trim(), cls = $('#ask-cls').value.trim(), qtxt = $('#ask-q').value.trim();
       if (!name || !qtxt) { $('#ask-msg').innerHTML = '<div class="fb err">请填写姓名和问题。</div>'; return; }
       S.profile.name = name; S.profile.cls = cls; save();
-      const payload = Object.assign({ name, cls, q: qtxt, t: new Date().toISOString(), shot: $('#ask-shot').checked ? askShot : null }, ctx);
+      const payload = Object.assign({ kind: 'ask', device: S.device, name, cls, q: qtxt, t: new Date().toISOString(), shot: $('#ask-shot').checked ? askShot : null }, ctx);
       const btn = $('#ask-send'); btn.disabled = true; btn.textContent = '发送中…';
       const res = await postAsk(payload);
-      if (res === 'ok') { closeAsk(); toast('已发送给老师'); }
+      if (res === 'ok') { closeAsk(); toast('已发送给老师，回复会出现在「我的」里'); setTimeout(fetchInbox, 1500); }
       else if (res === 'queued') { closeAsk(); toast('现在没有网络，连上网后会自动发送'); }
       else { $('#ask-msg').innerHTML = '<div class="fb err">发送失败。请检查网络后再试，或直接问老师。</div>'; btn.disabled = false; btn.textContent = '发送'; }
     };
@@ -947,6 +957,91 @@
     for (const p of q) { const r = await postAsk(p); if (r !== 'ok') left.push(p); }
     try { localStorage.setItem('paoding-outbox', JSON.stringify(left)); } catch (e) { /* ignore */ }
     if (left.length < q.length) toast('之前保存的问题已发送给老师');
+  }
+
+
+  /* ---------------- sign-in, usage reporting, replies ---------------- */
+  const APPV = '2026-10-21';
+  const EVQ = 'paoding-events';
+  function track(ev) {
+    if (!askOn()) return;
+    ev.t = Date.now();
+    try { const q = JSON.parse(localStorage.getItem(EVQ) || '[]'); q.push(ev); localStorage.setItem(EVQ, JSON.stringify(q.slice(-500))); } catch (e) { return; }
+    clearTimeout(track.timer); track.timer = setTimeout(flushEvents, 4000);
+  }
+  let flushing = false;
+  async function flushEvents() {
+    if (flushing || !askOn() || !navigator.onLine || !S.profile.name) return;
+    let q; try { q = JSON.parse(localStorage.getItem(EVQ) || '[]'); } catch (e) { return; }
+    if (!q.length) return;
+    flushing = true;
+    const batch = q.slice(0, 100);
+    try {
+      const r = await fetch(CFG.askUrl, { method: 'POST', body: JSON.stringify({ kind: 'events', device: S.device, name: S.profile.name, cls: S.profile.cls, v: APPV, events: batch }) });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) {
+        const cur = JSON.parse(localStorage.getItem(EVQ) || '[]');
+        localStorage.setItem(EVQ, JSON.stringify(cur.slice(batch.length)));
+        if (cur.length > batch.length) setTimeout(flushEvents, 1500);
+      }
+    } catch (e) { /* offline or blocked: keep the queue */ }
+    flushing = false;
+  }
+  function unread() { return (S.inbox || []).filter(i => i.reply && i.replyAt > (S.inboxSeen || 0)).length; }
+  function updateDots() {
+    const n = unread();
+    const b = $('#hd-ask'); if (b) b.classList.toggle('has-new', n > 0);
+    const m = $('#nav a[data-v="me"]'); if (m) m.classList.toggle('has-new', n > 0);
+  }
+  async function fetchInbox() {
+    if (!askOn() || !navigator.onLine) return;
+    try {
+      const r = await fetch(CFG.askUrl + (CFG.askUrl.indexOf('?') < 0 ? '?' : '&') + 'action=inbox&device=' + encodeURIComponent(S.device));
+      const j = await r.json();
+      if (!j || !j.ok || !Array.isArray(j.items)) return;
+      const before = unread();
+      S.inbox = j.items; save();
+      const after = unread();
+      updateDots();
+      if (view === 'me') { const box = $('#me-inbox'); if (box) { box.outerHTML = inboxHTML(); markInboxSeen(); } }
+      else if (after > before) toast('老师回复了你的问题，到「我的」查看');
+    } catch (e) { /* ignore */ }
+  }
+  function inboxHTML() {
+    if (!askOn() || !(S.inbox || []).length) return '<div id="me-inbox"></div>';
+    const items = S.inbox.slice().sort((a, b) => (b.replyAt || b.t) - (a.replyAt || a.t));
+    return '<section id="me-inbox" class="inbox"><h2 class="sec-title">我的提问 <span>Replies from your teacher</span></h2><ul>' + items.map(i => {
+      const isNew = i.reply && i.replyAt > (S.inboxSeen || 0);
+      return '<li class="ib' + (isNew ? ' new' : '') + '"><div class="ib-q"><span class="chip ' + (i.reply ? 'ok' : '') + '">' + (i.reply ? (isNew ? '新回复' : '已回复') : (i.status === '已回复' ? '已当面回复' : '等待回复')) + '</span><b>' + esc(i.q) + '</b></div>' +
+        (i.sentence ? '<p class="ib-s">' + esc(i.sentence) + (i.layer ? ' · ' + esc(i.layer) : '') + '</p>' : '') +
+        (i.reply ? '<div class="ib-r"><span>老师：</span>' + esc(i.reply) + '</div>' : '') + '</li>';
+    }).join('') + '</ul></section>';
+  }
+  function markInboxSeen() {
+    const mx = Math.max(0, ...(S.inbox || []).map(i => i.replyAt || 0));
+    if (mx > (S.inboxSeen || 0)) { setTimeout(() => { S.inboxSeen = mx; save(); updateDots(); }, 1200); }
+  }
+  function showReg(editing) {
+    let ov = $('#reg');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'reg'; document.body.appendChild(ov); }
+    ov.innerHTML = '<div class="ask-card" role="dialog" aria-modal="true" aria-labelledby="reg-t"><h2 id="reg-t" class="ask-title">' + (editing ? '修改登记信息' : '欢迎使用庖丁') + '</h2>' +
+      '<p class="reg-intro">先登记姓名和班级。老师会通过 Google 表格看到你的练习情况（做了哪些题、哪一层切错、哪天练习），用来安排复习和回答你的问题。只有老师能看到这些记录。</p>' +
+      '<form id="reg-form"><div class="tt-row"><label for="reg-name">姓名</label><input id="reg-name" autocomplete="name" value="' + esc(S.profile.name) + '" placeholder="例如：陈小明"><label for="reg-cls">班级</label><input id="reg-cls" value="' + esc(S.profile.cls) + '" placeholder="例如：26A01"></div>' +
+      '<div id="reg-msg" aria-live="polite"></div><div class="actions">' + (editing ? '<button type="button" class="btn ghost" id="reg-x">取消</button>' : '') + '<button type="submit" class="btn primary">' + (editing ? '保存' : '开始使用') + '</button></div></form></div>';
+    ov.hidden = false;
+    setTimeout(() => { const n = $('#reg-name'); if (n) n.focus(); }, 50);
+    const x = $('#reg-x'); if (x) x.onclick = () => { ov.hidden = true; ov.innerHTML = ''; };
+    $('#reg-form').onsubmit = e => {
+      e.preventDefault();
+      const name = $('#reg-name').value.trim(), cls = $('#reg-cls').value.trim().toUpperCase();
+      if (name.length < 2 || !cls) { $('#reg-msg').innerHTML = '<div class="fb err">请填写完整的姓名和班级。</div>'; return; }
+      const first = !S.profile.name;
+      S.profile.name = name; S.profile.cls = cls; save();
+      ov.hidden = true; ov.innerHTML = '';
+      if (first) { S.lastOpen = today(); save(); track({ type: 'open' }); toast('欢迎，' + name); }
+      else { toast('已保存'); if (view === 'me') go('me'); }
+      flushEvents();
+    };
   }
 
   /* ---------------- teacher tool ---------------- */
@@ -1002,11 +1097,21 @@
   }));
   $('#hd-home').addEventListener('click', e => { e.preventDefault(); go('home'); });
   const askBtn = $('#hd-ask'); if (askBtn) { askBtn.hidden = !askOn(); askBtn.addEventListener('click', openAsk); }
-  window.addEventListener('online', flushAsk); setTimeout(flushAsk, 3000);
+  window.addEventListener('online', () => { flushAsk(); flushEvents(); fetchInbox(); }); setTimeout(flushAsk, 3000);
+  if (askOn()) {
+    save();
+    if (!S.profile.name) showReg(false);
+    else if (S.lastOpen !== today()) { S.lastOpen = today(); save(); track({ type: 'open' }); }
+    updateDots();
+    setTimeout(() => { flushEvents(); fetchInbox(); }, 2000);
+    setInterval(fetchInbox, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') fetchInbox(); else flushEvents(); });
+  }
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !$('#ov').hidden) { ovQueue.shift(); showOverlay(); }
     if (e.key === 'Escape' && !$('#ask').hidden) closeAsk();
-    if (view === 'practice' && e.key === 'Enter' && $('#ask').hidden && e.target.tagName !== 'BUTTON') { const b = $('#pv-submit'); if (b) b.click(); }
+    if (e.key === 'Escape' && $('#reg') && !$('#reg').hidden && $('#reg-x')) $('#reg-x').click();
+    if (view === 'practice' && e.key === 'Enter' && $('#ask').hidden && !($('#reg') && !$('#reg').hidden) && e.target.tagName !== 'BUTTON') { const b = $('#pv-submit'); if (b) b.click(); }
   });
   window.addEventListener('hashchange', () => { const h = (location.hash || '').slice(1); if (['learn', 'me', 'teacher'].includes(h) && h !== view) go(h); });
   const h0 = (location.hash || '').slice(1);

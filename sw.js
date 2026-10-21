@@ -1,5 +1,5 @@
 /* 庖丁 service worker: app shell offline-first; bump VERSION whenever you edit the question bank */
-const VERSION = 'paoding-2026-10-20f';
+const VERSION = 'paoding-2026-10-21a';
 const SHELL = ['./', 'index.html', 'css/app.css', 'js/app.js', 'data/bank.js', 'data/concepts.js', 'data/config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
